@@ -1,19 +1,22 @@
+# src/utils.py
+# Safe utilities for the OCR robustness experiment.
+# - avoids importing heavy C-extensions at module import time
+# - provides pure-Python CER/WER
+# - uses Pillow for image composition and only imports matplotlib lazily
+
+import os
+import csv
 import json
 import math
-import os
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import Levenshtein  # type: ignore
-import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
-
+# ---------------- reproducibility ----------------
 def set_seed(seed: int) -> None:
-    """Set random seeds for reproducibility across random, numpy, and torch (if available)."""
-
     random.seed(seed)
     np.random.seed(seed)
     try:
@@ -23,62 +26,83 @@ def set_seed(seed: int) -> None:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
     except Exception:
-        # Torch is optional; ignore if not available or misconfigured.
+        # torch optional
         pass
 
 
+# ---------------- Levenshtein-like functions (pure Python) ----------------
+def _levenshtein_chars(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if la == 0:
+        return lb
+    if lb == 0:
+        return la
+    prev = list(range(lb + 1))
+    cur = [0] * (lb + 1)
+    for i, ca in enumerate(a, start=1):
+        cur[0] = i
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev, cur = cur, prev
+    return prev[lb]
+
+
 def cer(ref: str, hyp: str) -> float:
-    """Compute Character Error Rate (CER) as Levenshtein distance / len(ref).
-
-    If the reference is empty:
-      - return 0.0 if the hypothesis is also empty
-      - return 1.0 otherwise
-    """
-
-    ref = ref or ""
-    hyp = hyp or ""
+    ref = "" if ref is None else str(ref)
+    hyp = "" if hyp is None else str(hyp)
     if len(ref) == 0:
         return 0.0 if len(hyp) == 0 else 1.0
-    distance = Levenshtein.distance(ref, hyp)
-    return float(distance) / float(len(ref))
+    dist = _levenshtein_chars(ref, hyp)
+    return float(dist) / float(max(1, len(ref)))
 
 
 def wer(ref: str, hyp: str) -> float:
-    """Compute Word Error Rate (WER) using Levenshtein distance over space-separated tokens."""
-
-    ref_tokens = ref.split()
-    hyp_tokens = hyp.split()
+    ref_tokens = [] if not ref else str(ref).split()
+    hyp_tokens = [] if not hyp else str(hyp).split()
     if len(ref_tokens) == 0:
         return 0.0 if len(hyp_tokens) == 0 else 1.0
-    distance = Levenshtein.distance(" ".join(ref_tokens), " ".join(hyp_tokens))
-    return float(distance) / float(len(ref_tokens))
+    m, n = len(ref_tokens), len(hyp_tokens)
+    prev = list(range(n + 1))
+    cur = [0] * (n + 1)
+    for i in range(1, m + 1):
+        cur[0] = i
+        for j in range(1, n + 1):
+            cost = 0 if ref_tokens[i - 1] == hyp_tokens[j - 1] else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev, cur = cur, prev
+    dist = prev[n]
+    return float(dist) / float(max(1, m))
 
 
+# ---------------- I/O helpers ----------------
 def ensure_dir(path: str) -> None:
-    """Create a directory if it does not exist."""
-
     os.makedirs(path, exist_ok=True)
 
 
-def load_image_as_rgb(path: str) -> np.ndarray:
-    """Load an image as an RGB numpy array [H, W, 3] with values in [0, 255]."""
+def save_json(path: str, data: Dict[str, Any]) -> None:
+    ensure_dir(os.path.dirname(path))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
+
+def load_image_as_rgb(path: str) -> np.ndarray:
     img = Image.open(path).convert("RGB")
     return np.array(img)
 
 
 def save_image_from_array(path: str, image: np.ndarray) -> None:
-    """Save a numpy array image (H, W, 3) to disk."""
-
     img = Image.fromarray(image.astype(np.uint8))
+    ensure_dir(os.path.dirname(path))
     img.save(path)
 
 
+# ---------------- Example visualization (uses Pillow, no matplotlib) ----------------
 @dataclass
 class ExampleVisualization:
-    """Container for a before/after OCR visualization example."""
-
-    original: np.ndarray
+    original: np.ndarray  # HWC RGB
     augmented: np.ndarray
     gt_text: str
     pred_text: str
@@ -86,91 +110,86 @@ class ExampleVisualization:
     augmentation_name: str
 
 
-def save_before_after_example(
-    example: ExampleVisualization,
-    out_path: str,
-    figsize: Tuple[int, int] = (10, 4),
-) -> None:
-    """Save a side-by-side visualization of original vs augmented image with text annotations."""
+def _draw_multiline_text(img: Image.Image, text: str, position: Tuple[int, int], max_width: int, font: ImageFont.ImageFont):
+    # naive wrap
+    words = text.split()
+    lines = []
+    cur = ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        wbox = font.getsize(trial)[0]
+        if wbox <= max_width:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    y = position[1]
+    for line in lines:
+        img.text((position[0], y), line, fill=(0, 0, 0), font=font)
+        y += font.getsize(line)[1] + 2
 
+
+def save_before_after_example(example: ExampleVisualization, out_path: str, width: int = 800):
     ensure_dir(os.path.dirname(out_path))
-
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-    for ax in axes:
-        ax.axis("off")
-
-    axes[0].imshow(example.original)
-    axes[0].set_title("Original")
-
-    axes[1].imshow(example.augmented)
-    axes[1].set_title(
-        f"Aug: {example.augmentation_name}\n"
-        f"Backend: {example.backend}\n"
-        f"GT: {truncate_text(example.gt_text)}\n"
-        f"Pred: {truncate_text(example.pred_text)}"
-    )
-
-    plt.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight")
-    plt.close(fig)
-
-
-def truncate_text(text: str, max_len: int = 80) -> str:
-    """Truncate long text for plotting."""
-
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
-
-
-def save_json(path: str, data: Dict[str, Any]) -> None:
-    """Save a dictionary as JSON."""
-
-    ensure_dir(os.path.dirname(path))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    left = Image.fromarray(example.original.astype(np.uint8))
+    right = Image.fromarray(example.augmented.astype(np.uint8))
+    # Resize to common height
+    h = min(left.height, right.height, 600)
+    left = left.resize((int(left.width * (h / left.height)), h))
+    right = right.resize((int(right.width * (h / right.height)), h))
+    padding = 10
+    font = None
+    try:
+        font = ImageFont.truetype("arial.ttf", 14)
+    except Exception:
+        font = ImageFont.load_default()
+    # Compose
+    text_area_height = 160
+    total_w = left.width + right.width + padding * 3
+    total_h = h + text_area_height + padding * 2
+    canvas = Image.new("RGB", (total_w, total_h), color=(255, 255, 255))
+    canvas.paste(left, (padding, padding))
+    canvas.paste(right, (padding * 2 + left.width, padding))
+    draw = ImageDraw.Draw(canvas)
+    txt_x = padding
+    txt_y = padding + h + 8
+    header = f"Aug: {example.augmentation_name} | Backend: {example.backend}"
+    draw.text((txt_x, txt_y), header, fill=(0, 0, 0), font=font)
+    txt_y += 18
+    draw.text((txt_x, txt_y), "GT:", fill=(0, 0, 0), font=font)
+    _draw_multiline_text(draw, example.gt_text, (txt_x + 30, txt_y), max_width=total_w - 40, font=font)
+    # show pred
+    txt_y += 60
+    draw.text((txt_x, txt_y), "Pred:", fill=(0, 0, 0), font=font)
+    _draw_multiline_text(draw, example.pred_text, (txt_x + 40, txt_y), max_width=total_w - 40, font=font)
+    canvas.save(out_path)
 
 
-def aggregate_metrics(
-    rows: Iterable[Dict[str, Any]],
-    key_fields: Tuple[str, str] = ("augmentation", "backend"),
-) -> List[Dict[str, Any]]:
-    """Aggregate CER/WER metrics by (augmentation, backend).
+# ---------------- Aggregation and plotting (safe) ----------------
+def aggregate_metrics(rows: Iterable[Dict[str, Any]], key_fields: Tuple[str, str] = ("augmentation", "backend")) -> List[Dict[str, Any]]:
+    # returns list of dicts with fields:
+    # augmentation, backend, cer_mean, cer_std, wer_mean, wer_std, n
+    from collections import defaultdict
 
-    Returns a list of dicts with:
-      - augmentation
-      - backend
-      - cer_mean, cer_std
-      - wer_mean, wer_std
-      - n (number of examples)
-    """
-
-    buckets: Dict[Tuple[str, str], Dict[str, List[float]]] = {}
-    for row in rows:
-        key = (str(row.get(key_fields[0], "")), str(row.get(key_fields[1], "")))
-        cer_val = float(row.get("cer", math.nan))
-        wer_val = float(row.get("wer", math.nan))
-        if key not in buckets:
-            buckets[key] = {"cer": [], "wer": []}
-        if not math.isnan(cer_val):
-            buckets[key]["cer"].append(cer_val)
-        if not math.isnan(wer_val):
-            buckets[key]["wer"].append(wer_val)
-
-    aggregated: List[Dict[str, Any]] = []
-    for (aug, backend), metrics in buckets.items():
-        cer_vals = metrics["cer"]
-        wer_vals = metrics["wer"]
-        n = max(len(cer_vals), len(wer_vals))
-        if n == 0:
-            continue
-        cer_mean = float(np.mean(cer_vals)) if cer_vals else math.nan
-        cer_std = float(np.std(cer_vals)) if cer_vals else math.nan
-        wer_mean = float(np.mean(wer_vals)) if wer_vals else math.nan
-        wer_std = float(np.std(wer_vals)) if wer_vals else math.nan
-        aggregated.append(
+    group = defaultdict(list)
+    for r in rows:
+        k = (r.get("augmentation"), r.get("backend"))
+        group[k].append(r)
+    out = []
+    for (augmentation, backend), items in sorted(group.items()):
+        cer_vals = [float(x.get("cer", 0.0)) for x in items]
+        wer_vals = [float(x.get("wer", 0.0)) for x in items]
+        n = len(items)
+        cer_mean = float(np.mean(cer_vals)) if n > 0 else float("nan")
+        cer_std = float(np.std(cer_vals, ddof=1)) if n > 1 else 0.0
+        wer_mean = float(np.mean(wer_vals)) if n > 0 else float("nan")
+        wer_std = float(np.std(wer_vals, ddof=1)) if n > 1 else 0.0
+        out.append(
             {
-                "augmentation": aug,
+                "augmentation": augmentation,
                 "backend": backend,
                 "cer_mean": cer_mean,
                 "cer_std": cer_std,
@@ -179,81 +198,58 @@ def aggregate_metrics(
                 "n": n,
             }
         )
-    return aggregated
+    return out
 
 
-def plot_aggregated_metrics_bar(
-    aggregated: List[Dict[str, Any]],
-    out_path: str,
-    metric: str = "cer_mean",
-    error_metric: str = "cer_std",
-) -> None:
-    """Create a bar plot with error bars from aggregated metrics."""
-
-    ensure_dir(os.path.dirname(out_path))
-
-    if not aggregated:
-        return
-
-    backends = sorted({row["backend"] for row in aggregated})
-    augmentations = sorted({row["augmentation"] for row in aggregated})
-
-    x = np.arange(len(augmentations))
-    width = 0.8 / max(len(backends), 1)
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    for i, backend in enumerate(backends):
-        values = []
-        errors = []
-        for aug in augmentations:
-            row = next(
-                (r for r in aggregated if r["backend"] == backend and r["augmentation"] == aug),
-                None,
-            )
-            if row is None:
-                values.append(0.0)
-                errors.append(0.0)
-            else:
-                values.append(float(row.get(metric, 0.0)))
-                errors.append(float(row.get(error_metric, 0.0)))
-        ax.bar(
-            x + i * width,
-            values,
-            width,
-            yerr=errors,
-            label=backend,
-            capsize=3,
-        )
-
-    ax.set_xticks(x + width * (len(backends) - 1) / 2)
-    ax.set_xticklabels(augmentations, rotation=45, ha="right")
-    ax.set_ylabel(metric)
-    ax.set_title("OCR robustness by augmentation and backend")
-    ax.legend()
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
-
-    plt.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight")
-    plt.close(fig)
-
-
-def format_ranking(
-    aggregated: List[Dict[str, Any]],
-    metric: str = "cer_mean",
-) -> Dict[str, List[Tuple[str, float]]]:
-    """Return a ranking of augmentations by metric (ascending) for each backend."""
-
-    ranking: Dict[str, List[Tuple[str, float]]] = {}
+def format_ranking(aggregated: Iterable[Dict[str, Any]], metric: str = "cer_mean"):
+    # returns dict: backend -> list of (augmentation, value) sorted ascending (lower is better)
+    by_backend = {}
     for row in aggregated:
-        backend = str(row["backend"])
-        aug = str(row["augmentation"])
-        value = float(row.get(metric, math.nan))
-        ranking.setdefault(backend, []).append((aug, value))
+        b = row["backend"]
+        by_backend.setdefault(b, []).append((row["augmentation"], float(row.get(metric, float("nan")))))
+    for b, items in by_backend.items():
+        items.sort(key=lambda t: (math.inf if math.isnan(t[1]) else t[1]))
+        by_backend[b] = items
+    return by_backend
 
-    for backend, items in ranking.items():
-        items.sort(key=lambda x: (math.inf if math.isnan(x[1]) else x[1]))
-        ranking[backend] = items
 
-    return ranking
+def _import_matplotlib():
+    try:
+        import matplotlib
 
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        return plt
+    except Exception:
+        return None
+
+
+def plot_aggregated_metrics_bar(aggregated: Iterable[Dict[str, Any]], outpath: str, metric: str = "cer_mean", error_metric: str = "cer_std"):
+    labels = []
+    values = []
+    errs = []
+    for row in aggregated:
+        labels.append(f"{row['augmentation']}")
+        values.append(float(row.get(metric, float("nan"))))
+        errs.append(float(row.get(error_metric, 0.0)))
+    plt = _import_matplotlib()
+    ensure_dir(os.path.dirname(outpath))
+    if plt is None:
+        # fallback: write a small CSV so user can plot locally
+        csv_path = outpath.replace(".png", ".csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["augmentation", metric, error_metric])
+            for l, v, e in zip(labels, values, errs):
+                w.writerow([l, v, e])
+        return
+    x = range(len(labels))
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar(x, values, yerr=errs, capsize=4)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel(metric)
+    plt.tight_layout()
+    plt.savefig(outpath)
+    plt.close(fig)
