@@ -110,14 +110,35 @@ class ExampleVisualization:
     augmentation_name: str
 
 
-def _draw_multiline_text(img: Image.Image, text: str, position: Tuple[int, int], max_width: int, font: ImageFont.ImageFont):
-    # naive wrap
+def _draw_multiline_text(draw, text: str, position: Tuple[int, int], max_width: int, font):
+    """
+    draw: an ImageDraw.Draw object
+    text: the full text to wrap and draw
+    position: (x, y) starting coords
+    max_width: maximum pixel width allowed for one line
+    font: ImageFont instance
+    """
+    # helper to measure (w,h) of a string robustly across Pillow versions
+    def measure(s: str) -> Tuple[int, int]:
+        try:
+            # Pillow >= 8: ImageDraw.textbbox
+            bbox = draw.textbbox((0, 0), s, font=font)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except Exception:
+            try:
+                # Pillow provides font.getbbox in newer versions
+                bbox = font.getbbox(s)
+                return bbox[2] - bbox[0], bbox[3] - bbox[1]
+            except Exception:
+                # fallback (older versions)
+                return font.getsize(s)
+
     words = text.split()
     lines = []
     cur = ""
     for w in words:
         trial = (cur + " " + w).strip()
-        wbox = font.getsize(trial)[0]
+        wbox, _ = measure(trial)
         if wbox <= max_width:
             cur = trial
         else:
@@ -126,10 +147,13 @@ def _draw_multiline_text(img: Image.Image, text: str, position: Tuple[int, int],
             cur = w
     if cur:
         lines.append(cur)
-    y = position[1]
+
+    x0, y = position
+    # draw lines with small spacing
     for line in lines:
-        img.text((position[0], y), line, fill=(0, 0, 0), font=font)
-        y += font.getsize(line)[1] + 2
+        draw.text((x0, y), line, fill=(0, 0, 0), font=font)
+        _, h = measure(line)
+        y += int(h + 4)
 
 
 def save_before_after_example(example: ExampleVisualization, out_path: str, width: int = 800):

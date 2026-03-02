@@ -1,6 +1,11 @@
+import os
+# allow duplicate OpenMP runtimes (unsafe but pragmatic on Windows)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+# limit OpenMP/MKL threads to avoid oversubscription and extra runtime activity
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 import argparse
 import csv
-import os
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
