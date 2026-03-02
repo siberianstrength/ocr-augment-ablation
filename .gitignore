@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Conda / venv
+env/
+ocr-env/
+.venv/
+
+# Results
+results/
+*.png
+*.jpg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/

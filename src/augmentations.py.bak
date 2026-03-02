@@ -1,0 +1,141 @@
+# src/augmentations.py
+# Minimal pure-OpenCV / numpy augmentation utilities.
+# Replaces albumentations-based implementation to avoid binary dependency issues.
+# Each augmentation function signature: aug(image: np.ndarray, rng: np.random.RandomState) -> np.ndarray
+
+import cv2
+import numpy as np
+from typing import Callable, Dict, Tuple
+
+def no_change(image: np.ndarray, rng: np.random.RandomState) -> np.ndarray:
+    return image.copy()
+
+def rotation(image: np.ndarray, rng: np.random.RandomState,
+             max_angle: float = 15.0) -> np.ndarray:
+    h, w = image.shape[:2]
+    angle = float(rng.uniform(-max_angle, max_angle))
+    M = cv2.getRotationMatrix2D((w/2, h/2), angle, 1.0)
+    out = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REPLICATE)
+    return out
+
+def gaussian_blur(image: np.ndarray, rng: np.random.RandomState,
+                  ksize_range: Tuple[int,int]=(3,7)) -> np.ndarray:
+    k = int(rng.randint(ksize_range[0], ksize_range[1]+1))
+    if k % 2 == 0:
+        k += 1
+    sigma = float(rng.uniform(0.5, 2.0))
+    return cv2.GaussianBlur(image, (k,k), sigmaX=sigma)
+
+def jpeg_compression(image: np.ndarray, rng: np.random.RandomState,
+                     qualities=(30,50,80)) -> np.ndarray:
+    q = int(rng.choice(qualities))
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), q]
+    success, enc = cv2.imencode('.jpg', image, encode_param)
+    if not success:
+        return image
+    dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+    return dec
+
+def brightness_contrast(image: np.ndarray, rng: np.random.RandomState,
+                        contrast_range=(0.7,1.3), brightness_shift=20) -> np.ndarray:
+    alpha = float(rng.uniform(contrast_range[0], contrast_range[1]))  # contrast
+    beta = int(rng.randint(-brightness_shift, brightness_shift+1))    # brightness
+    out = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+    return out
+
+def salt_and_pepper(image: np.ndarray, rng: np.random.RandomState,
+                    amount_range=(0.01,0.03)) -> np.ndarray:
+    out = image.copy()
+    h, w = out.shape[:2]
+    amount = float(rng.uniform(amount_range[0], amount_range[1]))
+    num_salt = np.ceil(amount * h * w).astype(int)
+    # salt
+    coords = (rng.integers(0, h, num_salt), rng.integers(0, w, num_salt))
+    out[coords[0], coords[1]] = 255
+    # pepper
+    coords = (rng.integers(0, h, num_salt), rng.integers(0, w, num_salt))
+    out[coords[0], coords[1]] = 0
+    return out
+
+def affine_transform(image: np.ndarray, rng: np.random.RandomState,
+                     scale_range=(0.9,1.1), shear_deg=10.0) -> np.ndarray:
+    h, w = image.shape[:2]
+    sx = float(rng.uniform(scale_range[0], scale_range[1]))
+    sy = sx
+    shear = np.deg2rad(float(rng.uniform(-shear_deg, shear_deg)))
+    # build affine matrix: scale + shear
+    M = np.array([[sx, np.tan(shear), 0.0],
+                  [np.tan(shear), sy, 0.0]], dtype=np.float32)
+    # center transform to keep image centered
+    cx, cy = w/2, h/2
+    # apply by translating to origin, apply M, translate back
+    # warpAffine applies M to coordinates; adjust by translation
+    T = np.array([[1,0,-cx],
+                  [0,1,-cy],
+                  [0,0,1]], dtype=np.float32)
+    A = np.eye(3, dtype=np.float32)
+    A[:2,:2] = M
+    A = np.linalg.inv(T) @ A @ T
+    M2 = A[:2,:3]
+    out = cv2.warpAffine(image, M2, (w,h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return out
+
+def elastic_transform(image: np.ndarray, rng: np.random.RandomState,
+                      alpha=30, sigma=4) -> np.ndarray:
+    # Implementation adapted to use OpenCV remap
+    # image: HxWxC, alpha: scaling factor for displacement, sigma: smoothing
+    h, w = image.shape[:2]
+    # random displacement fields
+    dx = (rng.standard_normal((h, w)).astype(np.float32)) * alpha
+    dy = (rng.standard_normal((h, w)).astype(np.float32)) * alpha
+    # smooth them
+    dx = cv2.GaussianBlur(dx, (0,0), sigmaX=sigma, sigmaY=sigma)
+    dy = cv2.GaussianBlur(dy, (0,0), sigmaX=sigma, sigmaY=sigma)
+    # create meshgrid and add displacements
+    x, y = np.meshgrid(np.arange(w), np.arange(h))
+    map_x = (x + dx).astype(np.float32)
+    map_y = (y + dy).astype(np.float32)
+    remapped = cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return remapped
+
+def combined_mix(image: np.ndarray, rng: np.random.RandomState) -> np.ndarray:
+    funcs = [rotation, elastic_transform, gaussian_blur, jpeg_compression,
+             brightness_contrast, salt_and_pepper, affine_transform]
+    # apply 2-3 random transforms
+    k = int(rng.integers(2,4))
+    out = image.copy()
+    for i in range(k):
+        f = rng.choice(funcs)
+        out = f(out, rng)
+    return out
+
+# mapping name -> wrapper function with signature (image, rng)
+def get_augmentations(seed: int = 42) -> Dict[str, Callable[[np.ndarray, np.random.RandomState], np.ndarray]]:
+    # returns a dict of functions; caller should call each as aug(img, rng)
+    rng = np.random.RandomState(seed)
+    # We'll return closure functions that use a fresh RNG seeded from base rng for reproducibility
+    def make_wrapper(fn):
+        def wrapper(img, r=rng):
+            # advance rng state per call to avoid returning same transform
+            sub = np.random.RandomState(r.randint(0, 2**31 - 1))
+            return fn(img, sub)
+        return wrapper
+    aug_map = {
+        "no_change": make_wrapper(no_change),
+        "rotation": make_wrapper(rotation),
+        "elastic": make_wrapper(elastic_transform),
+        "gaussian_blur": make_wrapper(gaussian_blur),
+        "jpeg_compression": make_wrapper(jpeg_compression),
+        "brightness_contrast": make_wrapper(brightness_contrast),
+        "salt_and_pepper": make_wrapper(salt_and_pepper),
+        "affine": make_wrapper(affine_transform),
+        "combined_mix": make_wrapper(combined_mix)
+    }
+    return aug_map
+
+def apply_augmentation_by_name(img: np.ndarray, name: str, seed: int = 0) -> np.ndarray:
+    aug = get_augmentations(seed).get(name)
+    if aug is None:
+        raise ValueError(f"Unknown augmentation: {name}")
+    return aug(img)
