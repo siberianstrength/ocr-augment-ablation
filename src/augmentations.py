@@ -62,14 +62,14 @@ def affine_fn(img, rng, scale_range=(0.9,1.1), shear_deg=10.0):
     sx = float(rng.uniform(scale_range[0], scale_range[1]))
     sy = sx
     shear = np.deg2rad(float(rng.uniform(-shear_deg, shear_deg)))
-    M = np.array([[sx, np.tan(shear), 0.0],
-                  [np.tan(shear), sy, 0.0]], dtype=np.float32)
+    M = np.array([[sx, np.tan(shear)],
+              [np.tan(shear), sy]], dtype=np.float32)
     cx, cy = w/2, h/2
-    T = np.array([[1,0,-cx],[0,1,-cy],[0,0,1]], dtype=np.float32)
+    T = np.array([[1, 0, -cx], [0, 1, -cy], [0, 0, 1]], dtype=np.float32)
     A = np.eye(3, dtype=np.float32)
-    A[:2,:2] = M
+    A[:2, :2] = M
     A = np.linalg.inv(T) @ A @ T
-    M2 = A[:2,:3]
+    M2 = A[:2, :3]
     out = cv2.warpAffine(img, M2, (w,h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return out, {"scale": sx, "shear_deg": float(np.rad2deg(shear))}
 
