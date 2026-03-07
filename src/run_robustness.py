@@ -20,7 +20,6 @@ from utils import (
     ensure_dir,
     format_ranking,
     load_image_as_rgb,
-    plot_aggregated_metrics_bar,
     save_before_after_example,
     set_seed,
     wer,
@@ -218,14 +217,10 @@ def run_experiment(
         for row in rows:
             writer.writerow(row)
 
-    df = pd.DataFrame(rows)
     aggregated = aggregate_metrics(rows)
 
     agg_path = os.path.join(out_dir, "aggregated_metrics.csv")
     pd.DataFrame(aggregated).to_csv(agg_path, index=False)
-
-    plot_path = os.path.join(out_dir, "robustness_barplot.png")
-    plot_aggregated_metrics_bar(aggregated, plot_path, metric="cer_mean", error_metric="cer_std")
 
     ranking = format_ranking(aggregated, metric="cer_mean")
     duration_sec = time.time() - start_time
@@ -244,7 +239,6 @@ def run_experiment(
 
     print(f"Wrote detailed metrics to {metrics_path}")
     print(f"Wrote aggregated metrics to {agg_path}")
-    print(f"Wrote bar plot to {plot_path}")
     print(f"Wrote summary report to {summary_path}")
 
 

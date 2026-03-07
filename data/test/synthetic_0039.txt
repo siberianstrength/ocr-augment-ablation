@@ -1,1 +1,1 @@
-Total: $123.45
+TOTAL: 123.45 USD

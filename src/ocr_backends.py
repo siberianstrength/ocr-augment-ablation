@@ -6,6 +6,7 @@ from typing import Callable, Dict, Optional
 import numpy as np
 
 
+
 class OCRError(RuntimeError):
     """Raised when an OCR backend fails irrecoverably."""
 
@@ -76,7 +77,7 @@ def _init_trocr_backend() -> OCRBackend:
         if not torch.cuda.is_available():
             raise RuntimeError("TrOCR backend requires a GPU (CUDA not available).")
 
-        from transformers import TrOCRProcessor, VisionEncoderDecoderModel  # type: ignore
+        from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
         device = torch.device("cuda")
         model_name = "microsoft/trocr-base-printed"
@@ -95,7 +96,7 @@ def _init_trocr_backend() -> OCRBackend:
             return text.strip()
 
         return OCRBackend(name="trocr", fn=run, available=True)
-    except Exception as exc:  # pragma: no cover - optional / heavy dependency
+    except Exception as exc:  
         return OCRBackend(
             name="trocr",
             fn=lambda _: "",

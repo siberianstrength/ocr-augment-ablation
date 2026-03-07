@@ -1,5 +1,4 @@
 import os
-import csv
 import json
 import math
 import random
@@ -206,43 +205,3 @@ def format_ranking(aggregated: Iterable[Dict[str, Any]], metric: str = "cer_mean
         by_backend[b] = items
     return by_backend
 
-
-def _import_matplotlib():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        return plt
-    except Exception:
-        return None
-
-
-def plot_aggregated_metrics_bar(aggregated: Iterable[Dict[str, Any]], outpath: str, metric: str = "cer_mean", error_metric: str = "cer_std"):
-    labels = []
-    values = []
-    errs = []
-    for row in aggregated:
-        labels.append(f"{row['augmentation']}")
-        values.append(float(row.get(metric, float("nan"))))
-        errs.append(float(row.get(error_metric, 0.0)))
-    plt = _import_matplotlib()
-    ensure_dir(os.path.dirname(outpath))
-    if plt is None:
-        csv_path = outpath.replace(".png", ".csv")
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["augmentation", metric, error_metric])
-            for l, v, e in zip(labels, values, errs):
-                w.writerow([l, v, e])
-        return
-    x = range(len(labels))
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.bar(x, values, yerr=errs, capsize=4)
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.set_ylabel(metric)
-    plt.tight_layout()
-    plt.savefig(outpath)
-    plt.close(fig)

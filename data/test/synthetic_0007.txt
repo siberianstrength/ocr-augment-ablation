@@ -1,1 +1,1 @@
-Code: SAVE20
+Customer: John Doe

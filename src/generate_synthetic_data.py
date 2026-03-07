@@ -49,7 +49,7 @@ def random_text(rng: random.Random) -> str:
     return "".join(rng.choice(alphabet) for _ in range(length))
 
 
-def create_image(text: str, font: ImageFont.FreeTypeFont, width: int = 600, height: int = 80) -> Image.Image:
+def create_image(text: str, font: ImageFont.FreeTypeFont, width: int = 600, height: int = 140) -> Image.Image:
     bg_color = (255, 255, 255)
     fg_color = (0, 0, 0)
     img = Image.new("RGB", (width, height), color=bg_color)

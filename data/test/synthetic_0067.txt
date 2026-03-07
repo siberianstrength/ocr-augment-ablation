@@ -1,1 +1,1 @@
-Address: 123 Main St.
+Discount: 5.00

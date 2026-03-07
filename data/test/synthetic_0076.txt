@@ -1,1 +1,1 @@
-Username: user_123
+Discount: 5.00
