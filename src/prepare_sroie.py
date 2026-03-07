@@ -1,13 +1,3 @@
-"""
-Convert ICDAR SROIE dataset to our format (image + single-line .txt per receipt).
-
-SROIE annotations: each line is x1,y1,x2,y2,x3,y3,x4,y4,transcript
-We join all transcripts into one line per image.
-
-Usage:
-  python prepare_sroie.py --sroie_dir "data/0325updated.task1train(626p)" --images_dir "data/task1train" --out data/test
-  (If images are in the same folder as annotations, omit --images_dir)
-"""
 import argparse
 import os
 import shutil
@@ -17,7 +7,6 @@ from utils import ensure_dir
 
 
 def parse_sroie_txt(path: str) -> str:
-    """Parse SROIE annotation file: extract transcript from each line and join with space."""
     transcripts = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -26,7 +15,6 @@ def parse_sroie_txt(path: str) -> str:
                 continue
             parts = line.split(",")
             if len(parts) >= 9:
-                # First 8 are coords, rest is transcript (may contain commas)
                 transcript = ",".join(parts[8:]).strip()
                 if transcript:
                     transcripts.append(transcript)
@@ -84,8 +72,6 @@ def main() -> None:
         print(f"Skipped {skipped_no_image} annotations (no matching image in {images_dir})")
     if created == 0:
         print("\nNo images found! SROIE images are usually in a separate folder/zip.")
-        print("Download from: https://drive.google.com/open?id=1ShItNWXyiYtFDM5W02bceHuJjyeeJl2")
-        print("Extract and pass --images_dir to the folder containing the .jpg files.")
 
 
 if __name__ == "__main__":

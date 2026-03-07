@@ -22,16 +22,15 @@ class OCRBackend:
 
 def _init_pytesseract_backend() -> OCRBackend:
     try:
-        import pytesseract  # type: ignore
+        import pytesseract
         from PIL import Image
 
         def run(image: np.ndarray) -> str:
             img = Image.fromarray(image)
-            # Adjust configuration here if you need to set a custom tesseract_cmd.
             return pytesseract.image_to_string(img, lang="eng").strip()
 
         return OCRBackend(name="pytesseract", fn=run, available=True)
-    except Exception as exc:  # pragma: no cover - environment dependent
+    except Exception as exc:  
         return OCRBackend(
             name="pytesseract",
             fn=lambda _: "",
@@ -43,7 +42,7 @@ def _init_pytesseract_backend() -> OCRBackend:
 def _init_easyocr_backend() -> OCRBackend:
     try:
         import cv2
-        import easyocr  # type: ignore
+        import easyocr
         import torch
 
         gpu = bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
@@ -71,13 +70,6 @@ def _init_easyocr_backend() -> OCRBackend:
 
 
 def _init_trocr_backend() -> OCRBackend:
-    """Optional TrOCR backend via Hugging Face transformers.
-
-    This backend is disabled by default and only becomes available if:
-      - transformers is installed, and
-      - a GPU is available (torch.cuda.is_available()).
-    """
-
     try:
         import torch
 
@@ -116,14 +108,6 @@ def _init_trocr_backend() -> OCRBackend:
 
 
 def get_available_backends(include_trocr: bool = False) -> Dict[str, OCRBackend]:
-    """Return a mapping from backend name to OCRBackend instance.
-
-    Parameters
-    ----------
-    include_trocr:
-        If True, attempt to load the optional TrOCR backend (requires transformers and GPU).
-    """
-
     backends: Dict[str, OCRBackend] = {}
 
     pt = _init_pytesseract_backend()

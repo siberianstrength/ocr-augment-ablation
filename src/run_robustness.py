@@ -1,7 +1,5 @@
 import os
-# allow duplicate OpenMP runtimes (unsafe but pragmatic on Windows)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-# limit OpenMP/MKL threads to avoid oversubscription and extra runtime activity
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 import argparse
@@ -33,7 +31,6 @@ IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
 def find_image_pairs(data_dir: str) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
-    """Return (real_pairs, synthetic_pairs) of (image_path, text_path)."""
 
     image_paths: List[str] = []
     for root, _dirs, files in os.walk(data_dir):
@@ -60,7 +57,6 @@ def find_image_pairs(data_dir: str) -> Tuple[List[Tuple[str, str]], List[Tuple[s
 
 
 def _is_sroie_format(line: str) -> bool:
-    """Check if line looks like ICDAR SROIE: x1,y1,x2,y2,x3,y3,x4,y4,transcript."""
     parts = line.split(",")
     if len(parts) < 9:
         return False
@@ -103,7 +99,6 @@ def run_experiment(
     seed: int = 42,
     max_images: int = 0,
 ) -> None:
-    """Run the robustness experiment and write outputs to out_dir."""
 
     set_seed(seed)
     ensure_dir(out_dir)
@@ -186,7 +181,6 @@ def run_experiment(
                     }
                 )
 
-                # Save a limited number of illustrative examples (excluding no_change).
                 if saved_examples < examples_to_save and aug.name != "no_change":
                     example = ExampleVisualization(
                         original=original,
@@ -278,7 +272,6 @@ def write_summary_report(
     lines.append("## Aggregated metrics\n")
     lines.append("Per-augmentation, per-backend mean CER / WER:\n")
 
-    # Small markdown table
     header = "| Augmentation | Backend | CER mean | CER std | WER mean | WER std | N |"
     sep = "|---|---|---|---|---|---|---|"
     lines.append(header)
@@ -304,35 +297,7 @@ def write_summary_report(
             lines.append(f"- **{aug}**: CER ≈ {value:.3f}")
         lines.append("")
 
-    lines.append("## Recommendations\n")
-    lines.append(
-        "- Augment your training data with the strongest degradations (highest CER) to improve robustness, "
-        "but keep a mix of milder transformations to avoid overfitting to extreme cases."
-    )
-    lines.append(
-        "- For production OCR pipelines, consider pre-processing steps that counteract the most harmful "
-        "distortions (e.g., deblurring, denoising, deskewing) observed in this report."
-    )
-    lines.append(
-        "- EasyOCR and Tesseract may react differently to certain augmentations; choose the backend that "
-        "is most robust to the types of noise present in your domain."
-    )
-    lines.append("")
 
-    lines.append("## Next steps\n")
-    lines.append(
-        "- Run the optional finetuning experiment with a lightweight CRNN model on your real training data "
-        "to see if augmentation narrows the robustness gap."
-    )
-    lines.append(
-        "- Explore more advanced augmentations such as perspective warps, background clutter, or "
-        "domain-specific artifacts (e.g., scanner streaks, camera motion blur)."
-    )
-    lines.append(
-        "- Combine multiple OCR engines or add a language-model-based post-processing step to further "
-        "reduce CER/WER on noisy inputs."
-    )
-    lines.append("")
 
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

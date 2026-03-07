@@ -1,9 +1,3 @@
-# src/utils.py
-# Safe utilities for the OCR robustness experiment.
-# - avoids importing heavy C-extensions at module import time
-# - provides pure-Python CER/WER
-# - uses Pillow for image composition and only imports matplotlib lazily
-
 import os
 import csv
 import json
@@ -15,7 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-# ---------------- reproducibility ----------------
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -26,11 +19,9 @@ def set_seed(seed: int) -> None:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
     except Exception:
-        # torch optional
         pass
 
 
-# ---------------- Levenshtein-like functions (pure Python) ----------------
 def _levenshtein_chars(a: str, b: str) -> int:
     if a == b:
         return 0
@@ -77,7 +68,6 @@ def wer(ref: str, hyp: str) -> float:
     return float(dist) / float(max(1, m))
 
 
-# ---------------- I/O helpers ----------------
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
@@ -99,10 +89,9 @@ def save_image_from_array(path: str, image: np.ndarray) -> None:
     img.save(path)
 
 
-# ---------------- Example visualization (uses Pillow, no matplotlib) ----------------
 @dataclass
 class ExampleVisualization:
-    original: np.ndarray  # HWC RGB
+    original: np.ndarray
     augmented: np.ndarray
     gt_text: str
     pred_text: str
@@ -111,26 +100,15 @@ class ExampleVisualization:
 
 
 def _draw_multiline_text(draw, text: str, position: Tuple[int, int], max_width: int, font):
-    """
-    draw: an ImageDraw.Draw object
-    text: the full text to wrap and draw
-    position: (x, y) starting coords
-    max_width: maximum pixel width allowed for one line
-    font: ImageFont instance
-    """
-    # helper to measure (w,h) of a string robustly across Pillow versions
     def measure(s: str) -> Tuple[int, int]:
         try:
-            # Pillow >= 8: ImageDraw.textbbox
             bbox = draw.textbbox((0, 0), s, font=font)
             return bbox[2] - bbox[0], bbox[3] - bbox[1]
         except Exception:
             try:
-                # Pillow provides font.getbbox in newer versions
                 bbox = font.getbbox(s)
                 return bbox[2] - bbox[0], bbox[3] - bbox[1]
             except Exception:
-                # fallback (older versions)
                 return font.getsize(s)
 
     words = text.split()
@@ -149,7 +127,6 @@ def _draw_multiline_text(draw, text: str, position: Tuple[int, int], max_width: 
         lines.append(cur)
 
     x0, y = position
-    # draw lines with small spacing
     for line in lines:
         draw.text((x0, y), line, fill=(0, 0, 0), font=font)
         _, h = measure(line)
@@ -160,7 +137,6 @@ def save_before_after_example(example: ExampleVisualization, out_path: str, widt
     ensure_dir(os.path.dirname(out_path))
     left = Image.fromarray(example.original.astype(np.uint8))
     right = Image.fromarray(example.augmented.astype(np.uint8))
-    # Resize to common height
     h = min(left.height, right.height, 600)
     left = left.resize((int(left.width * (h / left.height)), h))
     right = right.resize((int(right.width * (h / right.height)), h))
@@ -170,7 +146,6 @@ def save_before_after_example(example: ExampleVisualization, out_path: str, widt
         font = ImageFont.truetype("arial.ttf", 14)
     except Exception:
         font = ImageFont.load_default()
-    # Compose
     text_area_height = 160
     total_w = left.width + right.width + padding * 3
     total_h = h + text_area_height + padding * 2
@@ -185,17 +160,13 @@ def save_before_after_example(example: ExampleVisualization, out_path: str, widt
     txt_y += 18
     draw.text((txt_x, txt_y), "GT:", fill=(0, 0, 0), font=font)
     _draw_multiline_text(draw, example.gt_text, (txt_x + 30, txt_y), max_width=total_w - 40, font=font)
-    # show pred
     txt_y += 60
     draw.text((txt_x, txt_y), "Pred:", fill=(0, 0, 0), font=font)
     _draw_multiline_text(draw, example.pred_text, (txt_x + 40, txt_y), max_width=total_w - 40, font=font)
     canvas.save(out_path)
 
 
-# ---------------- Aggregation and plotting (safe) ----------------
 def aggregate_metrics(rows: Iterable[Dict[str, Any]], key_fields: Tuple[str, str] = ("augmentation", "backend")) -> List[Dict[str, Any]]:
-    # returns list of dicts with fields:
-    # augmentation, backend, cer_mean, cer_std, wer_mean, wer_std, n
     from collections import defaultdict
 
     group = defaultdict(list)
@@ -226,7 +197,6 @@ def aggregate_metrics(rows: Iterable[Dict[str, Any]], key_fields: Tuple[str, str
 
 
 def format_ranking(aggregated: Iterable[Dict[str, Any]], metric: str = "cer_mean"):
-    # returns dict: backend -> list of (augmentation, value) sorted ascending (lower is better)
     by_backend = {}
     for row in aggregated:
         b = row["backend"]
@@ -260,7 +230,6 @@ def plot_aggregated_metrics_bar(aggregated: Iterable[Dict[str, Any]], outpath: s
     plt = _import_matplotlib()
     ensure_dir(os.path.dirname(outpath))
     if plt is None:
-        # fallback: write a small CSV so user can plot locally
         csv_path = outpath.replace(".png", ".csv")
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)

@@ -37,7 +37,6 @@ def load_fonts(fonts_dir: Optional[str] = None) -> List[ImageFont.FreeTypeFont]:
                 except Exception:
                     continue
     if not fonts:
-        # Fallback to default font.
         fonts.append(ImageFont.load_default())
     return fonts
 
@@ -45,7 +44,6 @@ def load_fonts(fonts_dir: Optional[str] = None) -> List[ImageFont.FreeTypeFont]:
 def random_text(rng: random.Random) -> str:
     if rng.random() < 0.7:
         return rng.choice(DEFAULT_TEXTS)
-    # simple random alphanumeric string
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     length = rng.randint(8, 20)
     return "".join(rng.choice(alphabet) for _ in range(length))
@@ -57,7 +55,6 @@ def create_image(text: str, font: ImageFont.FreeTypeFont, width: int = 600, heig
     img = Image.new("RGB", (width, height), color=bg_color)
     draw = ImageDraw.Draw(img)
 
-    # Compute text bounding box to center it.
     try:
         bbox = draw.textbbox((0, 0), text, font=font)
         text_w = bbox[2] - bbox[0]

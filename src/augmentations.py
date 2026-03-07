@@ -1,5 +1,3 @@
-# src/augmentations.py
-# Safe OpenCV + NumPy augmentations compatible with numpy.random.RandomState
 import cv2
 import numpy as np
 from typing import Tuple, List
@@ -96,21 +94,14 @@ def combined_mix_fn(img, rng):
         params["transforms"].append({"name": f.__name__, "params": p})
     return out, params
 
-# augmentation wrapper objects expected by run_robustness.py
 class AugObj:
     def __init__(self, name, fn):
         self.name = name
         self._fn = fn
     def apply(self, img, rng):
-        # expect rng to be a numpy.random.RandomState
         return self._fn(img, rng)
 
 def get_augmentations(seed: int = 42) -> List[AugObj]:
-    """
-    Return list of AugObj with .name and .apply(img, rng).
-    The run_robustness script constructs/reuses a RandomState and passes it.
-    """
-    # We DON'T create sub-RNG here; run_robustness passes its rng per-image so reproducibility is controlled upstream.
     return [
         AugObj("no_change", no_change_fn),
         AugObj("rotation", rotation_fn),
